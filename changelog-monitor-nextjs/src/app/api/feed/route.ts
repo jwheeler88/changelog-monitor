@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { marked } from 'marked'
+import { marked, Token } from 'marked'
 
 interface ChangelogEntry {
   version: string
@@ -22,8 +22,14 @@ export async function GET() {
     
     const markdownContent = await response.text()
     
+    // Debug: Log the first 1000 characters of the markdown
+    console.log('Markdown content preview:', markdownContent.substring(0, 1000))
+    
     // Parse the markdown and extract version entries
     const entries = parseChangelog(markdownContent)
+    
+    // Debug: Log how many entries we found
+    console.log('Found entries:', entries.length)
     
     // Normalize the feed structure
     const normalizedFeed = {
@@ -45,54 +51,74 @@ export async function GET() {
 }
 
 function parseChangelog(markdown: string): ChangelogEntry[] {
-  const lines = markdown.split('\n')
   const entries: ChangelogEntry[] = []
-  let currentEntry: Partial<ChangelogEntry> | null = null
-  let currentContent: string[] = []
   
-  for (const line of lines) {
-    // Check if this is a version header (e.g., ## 1.0.65)
-    const versionMatch = line.match(/^##\s+(\d+\.\d+\.\d+)/)
+  try {
+    // Use marked.lexer to properly tokenize the markdown
+    const tokens = marked.lexer(markdown)
+    console.log('Total tokens:', tokens.length)
     
-    if (versionMatch) {
-      // Save the previous entry if it exists
-      if (currentEntry && currentContent.length > 0) {
-        const rawContent = currentContent.join('\n').trim()
-        const htmlContent = marked(rawContent) as string
-        
-        currentEntry.content = htmlContent
-        // Create a plain text snippet by removing HTML tags
-        const plainText = htmlContent.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
-        currentEntry.contentSnippet = plainText.substring(0, 200) + (plainText.length > 200 ? '...' : '')
-        entries.push(currentEntry as ChangelogEntry)
-      }
+    let currentEntry: Partial<ChangelogEntry> | null = null
+    let currentTokens: Token[] = []
+    
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i]
       
-      // Start a new entry
-      const version = versionMatch[1]
-      currentEntry = {
-        version,
-        title: `Claude Code v${version}`,
-        link: `https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#${version.replace(/\./g, '')}`,
-        pubDate: new Date().toISOString(), // We don't have actual dates, so use current date
-        author: 'Anthropic',
-        guid: `claude-code-v${version}`
+      // Log heading tokens to understand the structure
+      if (token.type === 'heading') {
+        console.log(`Heading found - depth: ${token.depth}, text: "${token.text}"`)
+        
+        // Look for version headings (depth 2, containing version numbers)
+        const versionMatch = token.text.match(/(\d+\.\d+\.\d+)/)
+        
+        if (token.depth === 2 && versionMatch) {
+          console.log('Found version heading:', versionMatch[1])
+          
+          // Save the previous entry if it exists
+          if (currentEntry && currentTokens.length > 0) {
+            const htmlContent = marked.parser(currentTokens)
+            const plainText = htmlContent.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+            
+            currentEntry.content = htmlContent
+            currentEntry.contentSnippet = plainText.substring(0, 200) + (plainText.length > 200 ? '...' : '')
+            entries.push(currentEntry as ChangelogEntry)
+          }
+          
+          // Start a new entry
+          const version = versionMatch[1]
+          currentEntry = {
+            version,
+            title: `Claude Code v${version}`,
+            link: `https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#${version.replace(/\./g, '')}`,
+            pubDate: new Date().toISOString(),
+            author: 'Anthropic',
+            guid: `claude-code-v${version}`
+          }
+          currentTokens = []
+        } else if (currentEntry && token.depth > 2) {
+          // This is a sub-heading within a version section
+          currentTokens.push(token)
+        }
+      } else if (currentEntry) {
+        // This is content within a version section
+        currentTokens.push(token)
       }
-      currentContent = []
-    } else if (currentEntry && line.trim()) {
-      // Add content lines to the current entry
-      currentContent.push(line)
     }
-  }
-  
-  // Don't forget the last entry
-  if (currentEntry && currentContent.length > 0) {
-    const rawContent = currentContent.join('\n').trim()
-    const htmlContent = marked(rawContent) as string
     
-    currentEntry.content = htmlContent
-    const plainText = htmlContent.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
-    currentEntry.contentSnippet = plainText.substring(0, 200) + (plainText.length > 200 ? '...' : '')
-    entries.push(currentEntry as ChangelogEntry)
+    // Don't forget the last entry
+    if (currentEntry && currentTokens.length > 0) {
+      const htmlContent = marked.parser(currentTokens)
+      const plainText = htmlContent.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+      
+      currentEntry.content = htmlContent
+      currentEntry.contentSnippet = plainText.substring(0, 200) + (plainText.length > 200 ? '...' : '')
+      entries.push(currentEntry as ChangelogEntry)
+    }
+    
+    console.log('Total entries found:', entries.length)
+    
+  } catch (error) {
+    console.error('Error parsing markdown with marked.lexer:', error)
   }
   
   return entries
