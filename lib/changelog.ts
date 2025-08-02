@@ -2,15 +2,8 @@ import { marked } from 'marked';
 
 export interface ChangelogEntry {
   version: string;
-  date: string;
-  changes: {
-    added: string[];
-    changed: string[];
-    fixed: string[];
-    removed: string[];
-    security: string[];
-    deprecated: string[];
-  };
+  date?: string;
+  changes: string[];
 }
 
 export async function fetchChangelog(): Promise<string> {
@@ -29,44 +22,24 @@ export function parseChangelog(markdown: string): ChangelogEntry[] {
   const tokens = marked.lexer(markdown);
   const entries: ChangelogEntry[] = [];
   let currentEntry: Partial<ChangelogEntry> | null = null;
-  let currentChangeType: string | null = null;
 
   for (const token of tokens) {
-    if (token.type === 'heading') {
-      if (token.depth === 2) {
-        // Version header like "## v1.0.0 - 2024-01-01"
-        if (currentEntry) {
-          entries.push(currentEntry as ChangelogEntry);
-        }
-        
-        const headerMatch = token.text.match(/^v?([0-9]+\.[0-9]+\.[0-9]+.*?)\s*-\s*(.+)$/);
-        if (headerMatch) {
-          currentEntry = {
-            version: headerMatch[1],
-            date: headerMatch[2],
-            changes: {
-              added: [],
-              changed: [],
-              fixed: [],
-              removed: [],
-              security: [],
-              deprecated: [],
-            },
-          };
-        }
-      } else if (token.depth === 3 && currentEntry) {
-        // Change type header like "### Added"
-        const changeType = token.text.toLowerCase();
-        if (['added', 'changed', 'fixed', 'removed', 'security', 'deprecated'].includes(changeType)) {
-          currentChangeType = changeType;
-        }
+    if (token.type === 'heading' && token.depth === 2) {
+      // Save previous entry
+      if (currentEntry) {
+        entries.push(currentEntry as ChangelogEntry);
       }
-    } else if (token.type === 'list' && currentEntry && currentChangeType) {
-      // List of changes
+      
+      // Start new entry - format is just "## 1.0.65" (no date)
+      currentEntry = {
+        version: token.text.trim(),
+        changes: [],
+      };
+    } else if (token.type === 'list' && currentEntry) {
+      // List of changes directly under version header
       for (const item of token.items) {
-        if (item.text && currentEntry.changes) {
-          const key = currentChangeType as keyof typeof currentEntry.changes;
-          currentEntry.changes[key].push(item.text);
+        if (item.text) {
+          currentEntry.changes!.push(item.text);
         }
       }
     }
