@@ -1,7 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'export',
-  basePath: process.env.NODE_ENV === 'production' ? '/changelog-monitor' : '',
+  basePath: '/changelog-monitor',
+  assetPrefix: '/changelog-monitor',
   images: {
     unoptimized: true,
   },
