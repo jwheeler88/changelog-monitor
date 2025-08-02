@@ -8,4 +8,12 @@ export default defineConfig({
   build: {
     outDir: 'dist',
   },
+  define: {
+    global: 'globalThis',
+  },
+  resolve: {
+    alias: {
+      events: 'events'
+    }
+  }
 })
