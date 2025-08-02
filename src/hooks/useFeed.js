@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 
 const CLAUDE_CODE_FEED_URL = 'https://github.com/anthropics/claude-code/releases.atom'
-const CORS_PROXY = 'https://api.allorigins.win/raw?url='
+const CORS_PROXY = 'https://corsproxy.io/?'
 
 export const useFeed = (refreshInterval = 300000) => { // 5 minutes default
   const [feed, setFeed] = useState(null)
@@ -9,8 +9,11 @@ export const useFeed = (refreshInterval = 300000) => { // 5 minutes default
   const [error, setError] = useState(null)
 
   const parseAtomFeed = (xmlText) => {
+    // Debug what we're getting
+    console.log('XML Text sample:', xmlText.substring(0, 500))
+    
     const parser = new DOMParser()
-    const doc = parser.parseFromString(xmlText, 'application/xml')
+    const doc = parser.parseFromString(xmlText, 'text/xml')
     
     // Check for parsing errors
     const parseError = doc.querySelector('parsererror')
@@ -70,7 +73,12 @@ export const useFeed = (refreshInterval = 300000) => { // 5 minutes default
         throw new Error(`HTTP error! status: ${response.status}`)
       }
       
+      const contentType = response.headers.get('content-type')
+      console.log('Response content-type:', contentType)
+      
       const xmlText = await response.text()
+      console.log('Response text length:', xmlText.length)
+      
       const parsedFeed = parseAtomFeed(xmlText)
 
       setFeed(parsedFeed)
