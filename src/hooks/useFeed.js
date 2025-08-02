@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import * as parser from 'rss-parser-browser'
 
 const CLAUDE_CODE_FEED_URL = 'https://github.com/anthropics/claude-code/releases.atom'
 const CORS_PROXY = 'https://api.allorigins.win/raw?url='
@@ -8,54 +9,6 @@ export const useFeed = (refreshInterval = 300000) => { // 5 minutes default
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  const parseAtomFeed = (xmlText) => {
-    // Create a simple XML parser using DOMParser (browser built-in)
-    const parser = new DOMParser()
-    const doc = parser.parseFromString(xmlText, 'text/xml')
-    
-    // Handle parsing errors
-    if (doc.querySelector('parsererror')) {
-      throw new Error('Invalid XML format')
-    }
-
-    // Extract feed information
-    const feedTitle = doc.querySelector('feed > title')?.textContent || 'Claude Code Releases'
-    const feedSubtitle = doc.querySelector('feed > subtitle')?.textContent || ''
-    const feedLink = doc.querySelector('feed > link[rel="alternate"]')?.getAttribute('href') || 
-                    'https://github.com/anthropics/claude-code/releases'
-    const feedUpdated = doc.querySelector('feed > updated')?.textContent || new Date().toISOString()
-
-    // Extract entries
-    const entries = Array.from(doc.querySelectorAll('entry')).map(entry => {
-      const title = entry.querySelector('title')?.textContent || ''
-      const link = entry.querySelector('link')?.getAttribute('href') || ''
-      const published = entry.querySelector('published')?.textContent || ''
-      const updated = entry.querySelector('updated')?.textContent || ''
-      const content = entry.querySelector('content')?.textContent || ''
-      const summary = entry.querySelector('summary')?.textContent || ''
-      const author = entry.querySelector('author > name')?.textContent || 'anthropics'
-      const id = entry.querySelector('id')?.textContent || ''
-
-      return {
-        title: title,
-        link: link,
-        pubDate: published || updated,
-        contentSnippet: summary || content || 'No description available',
-        content: content || summary || 'No description available',
-        author: author,
-        guid: id || link
-      }
-    })
-
-    return {
-      title: feedTitle,
-      description: feedSubtitle,
-      link: feedLink,
-      lastBuildDate: feedUpdated,
-      items: entries
-    }
-  }
-
   const fetchFeed = async () => {
     try {
       setLoading(true)
@@ -63,20 +16,40 @@ export const useFeed = (refreshInterval = 300000) => { // 5 minutes default
       
       // Use CORS proxy to fetch the atom feed
       const proxyUrl = CORS_PROXY + encodeURIComponent(CLAUDE_CODE_FEED_URL)
-      const response = await fetch(proxyUrl)
       
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-      }
-      
-      const xmlText = await response.text()
-      const parsedFeed = parseAtomFeed(xmlText)
-      setFeed(parsedFeed)
+      // Use the browser-compatible RSS parser
+      parser.parseURL(proxyUrl, (err, parsed) => {
+        if (err) {
+          console.error('Failed to parse RSS feed:', err)
+          setError(err.message)
+          setLoading(false)
+          return
+        }
+
+        // Normalize the parsed feed to our expected format
+        const normalizedFeed = {
+          title: parsed.feed.title || 'Claude Code Releases',
+          description: parsed.feed.description || '',
+          link: parsed.feed.link || 'https://github.com/anthropics/claude-code/releases',
+          lastBuildDate: parsed.feed.lastBuildDate || new Date().toISOString(),
+          items: (parsed.feed.entries || []).map(entry => ({
+            title: entry.title || '',
+            link: entry.link || '',
+            pubDate: entry.pubDate || entry.isoDate || '',
+            contentSnippet: entry.contentSnippet || entry.content || 'No description available',
+            content: entry.content || entry.contentSnippet || 'No description available',
+            author: entry.creator || entry.author || 'anthropics',
+            guid: entry.guid || entry.link || ''
+          }))
+        }
+
+        setFeed(normalizedFeed)
+        setLoading(false)
+      })
       
     } catch (err) {
       console.error('Failed to fetch atom feed:', err)
       setError(err.message)
-    } finally {
       setLoading(false)
     }
   }
