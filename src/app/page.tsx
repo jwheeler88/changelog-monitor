@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { marked, Token } from 'marked'
 import ChangelogEntry from '@/components/ChangelogEntry'
 import LoadingSpinner from '@/components/LoadingSpinner'
 
@@ -32,12 +33,23 @@ export default function Home() {
       setLoading(true)
       setError(null)
       
-      const response = await fetch('/api/feed')
+      // Fetch directly from GitHub since we can't use API routes in static export
+      const response = await fetch('https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md')
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
       
-      const feedData = await response.json()
+      const markdownContent = await response.text()
+      const entries = parseChangelog(markdownContent)
+      
+      const feedData = {
+        title: 'Claude Code Changelog',
+        description: 'Stay up to date with the latest releases and improvements to Claude Code',
+        link: 'https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md',
+        lastBuildDate: new Date().toISOString(),
+        items: entries
+      }
+      
       setFeed(feedData)
       setLoading(false)
     } catch (err) {
@@ -141,4 +153,61 @@ export default function Home() {
       </div>
     </div>
   )
+}
+
+function parseChangelog(markdown: string): FeedItem[] {
+  const entries: FeedItem[] = []
+  
+  try {
+    const tokens = marked.lexer(markdown)
+    let currentEntry: Partial<FeedItem> | null = null
+    let currentTokens: Token[] = []
+    
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i]
+      
+      if (token.type === 'heading') {
+        const versionMatch = token.text.match(/(\d+\.\d+\.\d+)/)
+        
+        if (token.depth === 2 && versionMatch) {
+          if (currentEntry && currentTokens.length > 0) {
+            const htmlContent = marked.parser(currentTokens)
+            const plainText = htmlContent.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+            
+            currentEntry.content = htmlContent
+            currentEntry.contentSnippet = plainText.substring(0, 200) + (plainText.length > 200 ? '...' : '')
+            entries.push(currentEntry as FeedItem)
+          }
+          
+          const version = versionMatch[1]
+          currentEntry = {
+            title: `Claude Code v${version}`,
+            link: `https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#${version.replace(/\./g, '')}`,
+            pubDate: new Date().toISOString(),
+            author: 'Anthropic',
+            guid: `claude-code-v${version}`
+          }
+          currentTokens = []
+        } else if (currentEntry && token.depth > 2) {
+          currentTokens.push(token)
+        }
+      } else if (currentEntry) {
+        currentTokens.push(token)
+      }
+    }
+    
+    if (currentEntry && currentTokens.length > 0) {
+      const htmlContent = marked.parser(currentTokens)
+      const plainText = htmlContent.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+      
+      currentEntry.content = htmlContent
+      currentEntry.contentSnippet = plainText.substring(0, 200) + (plainText.length > 200 ? '...' : '')
+      entries.push(currentEntry as FeedItem)
+    }
+    
+  } catch (error) {
+    console.error('Error parsing markdown:', error)
+  }
+  
+  return entries
 }
